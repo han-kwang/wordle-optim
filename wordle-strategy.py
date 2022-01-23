@@ -43,7 +43,11 @@ def get5words_en_2(n=2700):
     """
     words = open('wordlist-en-freq.txt').read().split('\n')
     exp = re.compile('[A-Za-z]{5}$')
-    words = [w.lower() for w in words if re.match(exp, w)]
+    words = [
+        w.lower()
+        for w in words
+        if re.match(exp, w) and w not in ('aries', 'bligh', 'begum')
+        ]
     return words[:n]
 
 
@@ -83,7 +87,7 @@ def get_letfreq_pos():
     return lfpos
 
 
-def find_optimal_word(prev_words, tweaks=(0.05, 0.2, -0.2), ntop=100, verbose=True):
+def find_optimal_word(prev_words, tweaks=(0.1, 0.2, -0.5), ntop=100, verbose=True):
     """Find highest scoring word given previous word tries.
 
     - prev_words: list of previous words
@@ -112,7 +116,9 @@ def find_optimal_word(prev_words, tweaks=(0.05, 0.2, -0.2), ntop=100, verbose=Tr
     # Bonus based on position
     for w in topwords:
         for i, let in enumerate(w):
-            wscores[w] += tweaks[0]*LFPOS[ord(let)-ord('a'), i]
+            pbonus = LFPOS[ord(let)-ord('a'), i]
+            lbonus = LFREQ[let]
+            wscores[w] += tweaks[0]*pbonus*lbonus
 
     # Small bonus for previously seen letters on different positions
     # (more bonus for high-scoring letters).
@@ -159,6 +165,7 @@ def find_optimal_word(prev_words, tweaks=(0.05, 0.2, -0.2), ntop=100, verbose=Tr
     if verbose:
         print(f'For {letters}: {", ".join(tws_w_score[:5])}')
     return topwords[0]
+
 
 def match_1word(word, pwords):
     """Match probe words against word.
@@ -311,22 +318,26 @@ def evaluate_words_verbose(pwords, w1=0.5, smethod='fast', nsamp=10):
     print(f'Performance: {score:.1f}')
     print('Sample:')
     results = []
-    for w in WORDS[::len(WORDS)//nsamp]:
-        r = evaluate_1word(w, pwords, w1=w1, verbose=True, smethod=smethod,
+    for i, w in enumerate(WORDS[::len(WORDS)//nsamp]):
+        r = evaluate_1word(w, pwords, w1=w1, verbose=(i < 10), smethod=smethod,
                            ret_full=True)
         results.append(r)
+    if i > 10:
+        print('(Truncated after 10)')
     if smethod == 'slow':
         smean = np.mean(results)
         print(f'Mean score: {smean:.1f}')
     else:
         smean = np.array(results).mean(axis=0)  # columns: score, fhit, fpos
-        print(f'Mean: score {smean[0]:.1f}, letters found {smean[1]*100:.0f}%,'
-              ' positions found {smean[2]*100:.0f}%')
+        wlen = len(pwords[0])
+        print(f'Mean: score {smean[0]:.1f}, '
+              f'letters found {smean[1]*100:.0f}%, '
+              f'positions found {smean[2]*wlen:.2f}/{wlen}.')
 
 
     return score
 
-def evaluate_hyper(tweaks=(0.12, 0.1, -0.2), num=5, w1=0.5, verbose=True,
+def evaluate_hyper(tweaks=(0.25, -0.2, -0.5), num=5, w1=0.5, verbose=True,
                    smethod='fast'):
     """smethod: 'slow' or 'fast'
 
@@ -390,44 +401,6 @@ def scan_hyper(num=5, w1=0.5, tweak2=-0.2, plot=True, smethod='fast',
     return dict(tweaks=opt_tweak, w1=w1, num=num, smethod=smethod)
 
 
-def run_nl():
-    global WORDS, LFREQ, LFPOS
-    WORDS = get5words_nl()
-    LFREQ = getletfreq()
-    LFPOS = get_letfreq_pos()
-    plt.close('all')
-
-    kwargs1 = dict(num=3, w1=0.7, smethod='fast')
-    kwargs2 = scan_hyper(
-        **kwargs1,
-        t0range=(0, 0.4, 5), t1range=(-0.2, 0.4, 7), tweak2=-0.3
-        )
-
-    tweaks_n3_slow = (0.3, 0.0, -0.5)
-    tweaks_n4_fast = (0.4, -0.1, -0.5)
-    _, pwords_slow = evaluate_hyper(**{**kwargs2, **dict(smethod='slow', num=3)})
-    _, pwords = evaluate_hyper(**{**kwargs2, **dict(smethod='fast', num=5)})
-
-
-    # Hybrid: first 3 words optimized for computer, next 2 for humans.
-    pwords_hyb = pwords_slow.copy()
-    pwords_hyb.append(
-        find_optimal_word(pwords_hyb, tweaks=tweaks_n4_fast, verbose=False)
-        )
-    pwords_hyb.append(
-        find_optimal_word(pwords_hyb, tweaks=tweaks_n4_fast, verbose=False)
-        )
-
-    print(f'\n** Hybrid probe words: {", ".join(pwords_hyb)}')
-    evaluate_words_verbose(pwords_hyb, w1=0.7, smethod='fast')
-
-    print(repr(pwords_hyb))
-    print('\n\n')
-    for w in pwords_hyb:
-        print(f'     {w}')
-    print()
-
-
 def analyze_wordle_stats():
     """Original wordle statistics"""
     picks = (
@@ -451,46 +424,91 @@ def analyze_wordle_stats():
           f' (expected for flat-top: {sm:.2f}')
     print(f'not found: {notfound}')
 
-def run_en(hyperscan=False, n_corpus=2700):
+
+def run_nl(hyperscan=False, numw=4, w1=0.7):
+    """NL:
+
+    Best for either hits or pos hits:
+        ['toren', 'balie', 'drugs', 'gemak', 'schop']
+
+    """
+
+    global WORDS, LFREQ, LFPOS
+    WORDS = get5words_nl()
+    LFREQ = getletfreq()
+    LFPOS = get_letfreq_pos()
+    plt.close('all')
+
+
+    kwargs1 = dict(num=numw, w1=w1, smethod='fast')
+
+    if hyperscan:
+        kwargs2 = scan_hyper(
+            **kwargs1,
+            t0range=(0, 0.4, 9), t1range=(-0.3, 0.4, 15), tweak2=-0.5
+            )
+    else:
+        # from a previous run
+        kwargs2 = {**kwargs1, 'tweaks': (0.25, -0.15, -0.5)}
+
+    _, pwords = evaluate_hyper(**kwargs2, verbose=False)
+    for _ in range(5 - numw):
+       pwords.append(
+           find_optimal_word(pwords, tweaks=kwargs2['tweaks'], verbose=False)
+           )
+    print(f'Optimized for {numw} words: {repr(pwords)}')
+    print(f'tweaks={kwargs2["tweaks"]}')
+    for inum in (4, 5):
+        evaluate_words_verbose(pwords[:inum], w1=kwargs2['w1'], smethod='fast')
+    print('\n\n')
+    for w in pwords:
+        print(f'     {w}')
+    print()
+    return pwords
+
+
+
+def run_en(hyperscan=False, n_corpus=2700, numw=5, w1=0.7):
+    """Run for English.
+
+    Best for hit rate: ['raise', 'clout', 'nymph', 'bowed', 'kings']
+    Best for pos hits: ['raise', 'count', 'piled', 'shaky', 'began']
+    Manually tweaked: ['cares', 'point', 'bulky', 'width', 'gnome']
+
+    (Manual tweak: allow 'c' in first word for better position hits and
+     very little penalty on letter hit rate for the first 4 words together.)
+    """
     global WORDS, LFREQ, LFPOS
     WORDS = get5words_en_2(n_corpus)
     LFREQ = getletfreq()
     LFPOS = get_letfreq_pos()
     plt.close('all')
 
-    kwargs1 = dict(num=3, w1=0.7, smethod='slow')
-    tweaks_n3_slow = (0.05, 0.0, -0.5)  # from earlier runs
-    tweaks_n4_fast = (0.35, -0.1, -0.5)  # from earlier runs
+    kwargs1 = dict(num=numw, w1=w1, smethod='fast')
+
     if hyperscan:
         kwargs2 = scan_hyper(
             **kwargs1,
-            t0range=(0, 0.4, 5), t1range=(-0.2, 0.4, 7), tweak2=-0.3
+            t0range=(0, 0.4, 9), t1range=(-0.3, 0.4, 15), tweak2=-0.5
             )
     else:
-        kwargs2 = {**kwargs1, 'tweaks': tweaks_n3_slow}
+        # from a previous run
+        kwargs2 = {**kwargs1, 'tweaks': (0.25, -0.15, -0.5)}
 
-    _, pwords_slow = evaluate_hyper(**{**kwargs2, **dict(smethod='slow', num=3)})
-    _, pwords = evaluate_hyper(**{**kwargs2, **dict(smethod='fast', num=5)})
-
-
-    # Hybrid: first 3 words optimized for computer, next 2 for humans.
-    pwords_hyb = pwords_slow.copy()
-    pwords_hyb.append(
-        find_optimal_word(pwords_hyb, tweaks=tweaks_n4_fast, verbose=False)
-        )
-    pwords_hyb.append(
-        find_optimal_word(pwords_hyb, tweaks=tweaks_n4_fast, verbose=False)
-        )
-
-    print(f'\n** Hybrid probe words: {", ".join(pwords_hyb)}')
-    evaluate_words_verbose(pwords_hyb, w1=0.7, smethod='fast')
-
-    print(repr(pwords_hyb))
+    _, pwords = evaluate_hyper(**kwargs2, verbose=False)
+    for _ in range(5 - numw):
+       pwords.append(
+           find_optimal_word(pwords, tweaks=kwargs2['tweaks'], verbose=False)
+           )
+    print(f'Optimized for {numw} words: {repr(pwords)}')
+    print(f'tweaks={kwargs2["tweaks"]}')
+    for inum in (4, 5):
+        evaluate_words_verbose(pwords[:inum], w1=kwargs2['w1'], smethod='fast')
     print('\n\n')
-    for w in pwords_hyb:
+    for w in pwords:
         print(f'     {w}')
     print()
-
+    return pwords
 
 def search(regexp, good_letters, tried_letters):
     """Search for words.
@@ -500,7 +518,7 @@ def search(regexp, good_letters, tried_letters):
     - triedletters: str with all letters as tried.
     """
     good_letters = set(good_letters)
-    for let in regexp:
+    for let in re.sub(r'\[.*?\]', '', regexp):
         if let != '.':
             good_letters.add(let)
     regexp = re.compile(regexp)
@@ -522,11 +540,7 @@ def search(regexp, good_letters, tried_letters):
             words2.append(w)
     print(', '.join(words2[:20]))
 
-
 if __name__ == '__main__':
     # run_en(hyperscan=True, n_corpus=1200)
-    WORDS = get5words_en_2(2500)
-    evaluate_words_verbose(
-        ['cares', 'joint', 'bulky', 'width', 'plume'][:],
-        smethod='fast', nsamp=20
-        )
+    run_nl(hyperscan=True,w1=0.5)
+
