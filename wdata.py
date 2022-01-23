@@ -50,12 +50,22 @@ def _get5words_nl():
             'budak', 'bedum', 'dumps'
             }
         )
+def _get5words_nl():
+    return _get5words(
+        ['woordle-nl.txt'],
+        blacklist={
+            'aties','olink', 'molin', 'limon', 'leoni', 'pilon',
+            'budak', 'bedum', 'dumps'
+            }
+        )
 
 def init(wset):
-    """Init global WORDS list from dataset 'en', 'enbig', 'nl'."""
+    """Init global WORDS list from dataset 'en', 'enbig', 'nl', 'nlbig'."""
     global WORDS
     if wset == 'nl':
-        WORDS = _get5words_nl()
+        WORDS = _get5words(['woordle-nl.txt'])
+    elif wset == 'nlbig':
+        WORDS = _get5words(['woordle-nl-full.txt'])
     elif wset == 'en':
         WORDS = _get5words_en_2(2700)
     elif wset == 'enbig':

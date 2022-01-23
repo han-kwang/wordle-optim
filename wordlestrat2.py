@@ -2,14 +2,54 @@
 # -*- coding: utf-8 -*-
 """Wordle strategy 2 - brute force
 
-Created on Sat Jan 22 21:25:10 2022
+For online game:
 
-@author: hk_nien
+- https://www.powerlanguage.co.uk/wordle/ (English, ~2700 dictionary)
+- https://hellowordl.net/ (English, ~5000 dictionary?)
+- https://woordle.nl/ (Dutch, 860 solutions but recognizes ~5500 words).
+
+
+Finding optimal words to try, given hints.
+
+Strings are handled as numpy int16 arrays; positive values for unicode/ascii
+characters and value -1 for 'undefined/unknown'.
+
+Functions with int array interface:
+
+- str2iarr(): convert strings to int arrays
+- iarr2str(): convert int array to strings
+- gethints_1iword: Get hints for try-word, given solution word.
+- gethints_all: Try a word (int array) against entire vocabulary
+- imatch_hints: Match vocabulary against hints
+
+Functions with string interface:
+
+- init(): load/initialize dictionaries
+- count_tries(): Return number of attempts to find the specified word.
+- find_optimal_first_word(): Find optimal first word. This is slow.
+- get_next_tword(): Suggest next word to try
+- test_words: Test all vocabulary words for selectivity.
+
+Globals:
+
+- ALPH_LEN: alphabet length (typically 26)
+- ALPH_START: ascii code of first alphabet letter (all is lowercase)
+- WORDS_ARR: puzzle word array, shape (n, 5)
+- WORDS_ARR_BIG: recognized word array, shape (nn, 5).
+
+Created on Sat Jan 22 21:25:10 2022 // author: hk_nien
 """
-from time import time, sleep
+from time import time
 from multiprocessing import Pool
 import numpy as np
 import wdata
+
+WORDS_ARR = None  # Will be (n, 5) int array
+WORDS_ARR_BIG = None  # Will be (nn, 5) int array
+ALPH_START = ord('a')
+ALPH_LEN = ord('z') - ord('a') + 1
+
+#%%
 
 def str2iarr(words):
     """Convert word (str) list to int16 array. '.' becomes -1.
@@ -49,12 +89,26 @@ def iarr2str(warr):
         sarr = sarr.reshape(-1)
     return sarr
 
-wdata.init('nl')
-WORDS_ARR = str2iarr(wdata.WORDS)
-ALPH_START = ord('a')
-ALPH_LEN = ord('z') - ALPH_START + 1
 
+def init(dataset='nl'):
+    """Initialize for 'nl', 'en-orig', or 'en-hello'."""
+    global WORDS_ARR, WORDS_ARR_BIG, ALPH_START, ALPH_LEN
+    ALPH_START = ord('a')
+    ALPH_LEN = ord('z') - ALPH_START + 1
 
+    if dataset == 'nl':
+        wdata.init('nlbig')
+        WORDS_ARR_BIG = str2iarr(wdata.WORDS)
+        wdata.init('nl')
+        WORDS_ARR = str2iarr(wdata.WORDS)
+    elif dataset == 'en-orig':
+        wdata.init('en')
+        WORDS_ARR = WORDS_ARR_BIG = str2iarr(wdata.WORDS)
+    elif dataset == 'en-hello':
+        wdata.init('enbig')
+        WORDS_ARR = WORDS_ARR_BIG = str2iarr(wdata.WORDS)
+    else:
+        raise ValueError(f'dataset={dataset!r}')
 
 def imatch_hints(pattern, badpos, badlets, warr=None):
     """Match vocabulary (int representation) against hints.
@@ -188,7 +242,7 @@ def _test_1word(tword):
         nmatch[j] = len(matches)
     return nmatch.mean()
 
-def test_words(warr, twarr=None, nshow=3):
+def test_words(warr, twarr=None, nshow=3, pri_time=2):
     """Test all vocabulary words for selectivity.
 
     Parameters:
@@ -196,6 +250,7 @@ def test_words(warr, twarr=None, nshow=3):
     - warr: word array (n, 5) to match against
     - twarr: try words array (m, 5); default: same as words.
     - nshow: number of best matches to show. Set to 0 to be silent.
+    - pri_time: show progress indicator if run time exceeds this.
 
     Return:
 
@@ -222,11 +277,11 @@ def test_words(warr, twarr=None, nshow=3):
         for i, a in enumerate(asyncs):
             mean_nmatchs.append(a.get())
             tm = time()
-            if tm - tm_prev > 1:
+            if tm - tm_prev > 1 and tm - tm_start > pri_time:
                 print(f'\rtest_words {i+1}/{ntw}...', end='')
                 tm_prev = tm
 
-    if tm - tm_start > 1:
+    if tm - tm_start > pri_time:
         print(f'Done ({tm - tm_start:.0f} s).')
     mean_nmatchs = np.array(mean_nmatchs)
     ii = np.argsort(mean_nmatchs)
@@ -246,9 +301,9 @@ def _get_best_tword(warr):
     """Get best test word (and # remaining) to select from specified list."""
     if len(warr) <= 2:
         tword = warr[0]
-        n = len(warr)
+        n = max(1, len(warr)-1)
     else:
-        twords1, scores = test_words(warr, WORDS_ARR, nshow=0)
+        twords1, scores = test_words(warr, WORDS_ARR, nshow=0, pri_time=3)
         # get all candidate words that are optimal
         n = scores[0]
         twords1 = twords1[scores == n]
@@ -259,6 +314,27 @@ def _get_best_tword(warr):
         else:
             tword = twords1[0]
     return tword, n
+
+
+def color_str_try(secret_word, try_word):
+    """Return string with ANSI escape sequences for hints.
+
+    Parameters:
+
+    - secret_word: string
+    - try_word: string
+    """
+    esc = lambda c, x: f'\033[{c}m{x}'
+    out = [esc('38;2;0;0;0', '')]  # black foregroud
+    for tl, sl in zip(try_word, secret_word):
+        if tl == sl:
+            out.append(esc('48;2;40;200;40', tl)) # green
+        elif tl in secret_word:
+            out.append(esc('48;2;200;150;40', tl)) # orange
+        else:
+            out.append(esc('48;2;180;180;180', tl))
+    out.append(esc('0', ''))  # reset
+    return ''.join(out)
 
 
 def count_tries(secret_word, first_tword='tenor', maxtries=6, warr=None, verbose=True):
@@ -314,18 +390,31 @@ def count_tries(secret_word, first_tword='tenor', maxtries=6, warr=None, verbose
             tword, _ = _get_best_tword(warr)
 
     if verbose:
-        print(f'{iarr2str(secret_word)}: {", ".join([iarr2str(tw) for tw in twords])}')
+        color_words = [
+            color_str_try(iarr2str(secret_word), iarr2str(tw))
+            for tw in twords
+            ]
+        if itry >= maxtries:
+            msg = '\033[31;1m  (Not found)\033[0m'
+        else:
+            msg = ''
+        print(f'{iarr2str(secret_word)}: {", ".join(color_words)}{msg}')
     return itry+1
 
 
-def get_next_tword(pattern, badpos, twords):
-    """Suggest next word to try (human-friendly interface).
+def match_hints(pattern, badpos, twords, mode='print'):
+    """Show or return words that match the hints; human-friendly.
 
     Parameters:
 
     - pattern: e.g. '..a.n' (green letters)
     - badpos: e.g. 'z..../bl.../....k' (letters at green positions)
     - twords: e.g. 'zuster/bloem/draak'
+    - mode: 'print' or 'return'
+
+    Return (only for mode='return'):
+
+    - warr: list of matching words (as int array)
     """
     # Parse
     pattern = str2iarr(pattern)
@@ -337,8 +426,13 @@ def get_next_tword(pattern, badpos, twords):
             raise ValueError(f'badpos word {w!r} wrong length')
         for i, let in enumerate(w):
             if let != '.':
-                badpos1.append((i, ord(let)))
-                goodletters.add(ord(let))
+                ilet = ord(let)
+                if pattern[i] == ilet:
+                    raise ValueError(
+                        f'Inconsistent hints: {let} at position {i+1}'
+                        )
+                badpos1.append((i, ilet))
+                goodletters.add(ilet)
     badlet = set()
     for let in twords:
         if let not in './' and ord(let) not in goodletters:
@@ -347,31 +441,119 @@ def get_next_tword(pattern, badpos, twords):
 
     # Get matches
     warr = imatch_hints(pattern, badpos1, badlet)
+    if mode == 'print':
+        wlist = iarr2str(warr)
+        txt = ', '.join(wlist[:20])
+        if len(wlist) > 20:
+            print(f'Showing 20 of {len(wlist)} matches: {txt}')
+        elif len(wlist) == 0:
+            print('No matches!')
+        else:
+            print(f'Found matches: {txt}')
+        return None
+    elif mode == 'return':
+        return warr
+    else:
+        raise ValueError(f'mode={mode!r}')
 
+
+def get_next_tword(pattern, badpos, twords):
+    """Suggest next word to try (human-friendly interface).
+
+    Parameters:
+
+    - pattern: e.g. '..a.n' (green letters)
+    - badpos: e.g. 'z..../bl.../....k' (letters at green positions)
+    - twords: e.g. 'zuster/bloem/draak'
+    """
+    try:
+        warr = match_hints(pattern, badpos, twords, mode='return')
+    except ValueError as e:
+        if 'Inconsistent hints' in e.args[0]:
+            print(f'Error: {e.args[0]}')
+            return
+        raise
     # Get optimal next word
     if len(warr) == 0:
         print('No match!')
     else:
+        if len(warr)*len(WORDS_ARR) > 30000:
+            print(f'({len(warr)} words match the hints)')
         tword, n = _get_best_tword(warr)
-        print(f'Best next word: {iarr2str(tword)} ({n})')
+        print(f'Best next word: {iarr2str(tword)} ({n:.2f}/{len(warr)})')
 
 
+def find_optimal_first_word(select=1, ret_full=False, print_=True):
+    """Find optimal first word. This is slow.
+
+    Parameters:
+
+    - select: indicate dictionary size to work with; 0: small for testing;
+      1: select words from WORDS_ARR; 2: select from WORDS_ARR_BIG.
+    - ret_full: True to return full list; False to return best 10 and
+      another 10 picked from the rest.
+
+    Return:
+
+    - List of (word_str, mean_matches)
+
+    For language NL, select=2 (865/5539 words):
+    tenor (21.6), raten (21.9), toner (22.3), ..., puppy (491)
+
+    For en-orig, select=1 (2700/2700 words):
+    raise (57.9), arise (61.7), rates (62), ..., fuzzy (1202)
+    """
+    if select == 0:
+        warr, twarr = WORDS_ARR[::5], WORDS_ARR[::5]
+    elif select == 1:
+        warr, twarr = WORDS_ARR, WORDS_ARR
+    elif select == 2:
+        warr, twarr = WORDS_ARR, WORDS_ARR_BIG
+    else:
+        raise ValueError(f'select={select}')
+    words, scores = test_words(warr, twarr)
+    words = iarr2str(words)
+    scores = np.around(scores, 2)
+    scores[scores >= 100] = np.around(scores[scores >= 100])
+
+    nw = len(words)
+    m = 10
+    if nw <= 2*m or ret_full:
+        ii = np.arange(nw)
+    else:
+        ii1 = np.arange(m)
+        ii2 = np.around(np.linspace(m-1, nw-1, m+1)[1:]).astype(int)
+        ii = np.concatenate((ii1, ii2))
+    wlist = [(words[i], scores[i]) for i in ii]
+    if print_:
+        print('First word rankings.\n'
+              f'(Selected from {nw} against dictionary {len(warr)})\n'
+              'Rank Word   Number remaining):')
+        for i in ii:
+            print(f'{i+1:4d} {words[i]:<6s} {scores[i]:g}')
+    return wlist
+
+#%%
 if __name__ == '__main__':
-    warr = WORDS_ARR[::1]
+
+    init('nl')
+
     if 0:
-        str2iarr(['aarde'])[0]
+        # This is slow; run this with F9 only.
+        find_optimal_first_word(select=1)
+    if 0:
+        # This is very slow; run this with F9 only.
+        find_optimal_first_word(select=2)
 
-
-        # small dictionary for testing
-        # print(list(iarr2str(warr)))
-
-        # breakpoint()
-        pats, bposs, blets = gethints_all(str2iarr(['aarde'])[0], warr)
-        print(f'patterns: {list(iarr2str(pats))}')
-        print(f'bposs: {list(iarr2str(bposs))}')
-        print(f'badlet:\n{blets.astype(int)}')
-    # goodwords, scores = test_words(warr)
-    # tenor, toren, later
-    # count_tries('natix', 'tenor')
-
-
+    if 0:
+        print('Demo: how it would find words:')
+        for w in WORDS_ARR[::len(WORDS_ARR)//5]:
+            count_tries(w, 'tenor')
+    if 1:
+        print('Demo: playing')
+        twords = 'toren/gebak' # words as tried
+        pattern = '...e.' # green letters (position correct)
+        badpos = '..r../ge.a.' # yellow letters (wrong position)
+        print(f'Tried: {twords}; hits: {pattern}; bad position: {badpos}')
+        get_next_tword(pattern, badpos, twords)
+        match_hints(pattern, badpos, twords)
