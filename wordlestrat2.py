@@ -15,6 +15,7 @@ Created on Sat Jan 22 21:25:10 2022 // author: hk_nien
 """
 from time import time
 import sys
+from pathlib import Path
 from multiprocessing import Pool
 from threadpoolctl import threadpool_limits
 import numpy as np
@@ -102,7 +103,10 @@ class Wordle:
     - count_tries(): Return number of attempts to find the specified word.
     - find_optimal_first_word(): Find optimal first word. This is slow.
     - get_next_tword(): Suggest next word to try
-    - test_words: Test all vocabulary words for selectivity.
+    - match_hints(): Find words that match the hints.
+    - gnt(), mh(): shorthand forms of get_next_tword(), match_hints()
+    - test_words(): Test all vocabulary words for selectivity.
+    - build_cache(): build cache file for first words.
 
     Functions with int array interface for internal use:
 
@@ -119,6 +123,8 @@ class Wordle:
     - self.words_arr: puzzle word array, shape (n, 5)
     - self.words_arr_big: recognized word array, shape (nn, 5).
     - dataset: dataset used for initialization (do not modify).
+    - cache: dictionary with keys '<firstword> <pattern> <badpos>',
+      values (num_match, next_word, num_match_next)
     """
     def __init__(self, dataset='nl'):
         """Initialize for 'nl', 'en-orig', or 'en-hello'."""
@@ -137,10 +143,30 @@ class Wordle:
         else:
             raise ValueError(f'dataset={dataset!r}')
         self.dataset = str(dataset)
+        self.cache = self._load_cache()
 
     def __repr__(self):
         cn = self.__class__.__name__
         return(f'{cn}({self.dataset!r})')
+
+    def _load_cache(self):
+        """Load and return cache dict."""
+        cfpath = self._get_cache_fpath()
+        cache = {}
+        if not cfpath.is_file():
+            print(f'No cache file {cfpath}; use build_cache() to build one.')
+            return cache
+
+        with cfpath.open('r') as f:
+            for lno, line in enumerate(f):
+                if line == '' or line == '\n' or line[0] == '#':
+                    continue
+                fields = line.split()
+                if len(fields) != 6:
+                    raise ValueError(f'{cfpath}: parse error on line {lno+1}')
+                key = f'{fields[0]} {fields[1]} {fields[2]}'
+                cache[key] = (int(fields[3]), fields[4], float(fields[5]))
+        return cache
 
     def imatch_hints(self, pattern, badpos, badlets, warr=None):
         """Match vocabulary (int representation) against hints.
@@ -494,21 +520,30 @@ class Wordle:
         - badpos: e.g. 'z..../bl.../....k' (letters at green positions)
         - twords: e.g. 'zuster/bloem/draak'
         """
-        try:
-            warr = self.match_hints(pattern, badpos, twords, mode='return')
-        except ValueError as e:
-            if 'Inconsistent hints' in e.args[0]:
-                print(f'Error: {e.args[0]}')
-                return
-            raise
-        # Get optimal next word
-        if len(warr) == 0:
+        cache_key = f'{twords} {pattern} {badpos}'
+        if cache_key in self.cache:
+            nm, tword, nmn = self.cache[cache_key]
+        else:
+            try:
+                warr = self.match_hints(pattern, badpos, twords, mode='return')
+            except ValueError as e:
+                if 'Inconsistent hints' in e.args[0]:
+                    print(f'Error: {e.args[0]}')
+                    return
+                raise
+            nm = len(warr)
+            # Get optimal next word
+            if nm > 0:
+                if nm*len(self.words_arr) > 30000:
+                    print(f'({len(warr)} words match the hints)')
+                tword, nmn = self._get_best_tword(warr)
+                tword = iarr2str(tword)
+                self.cache[cache_key] = (nm, tword, nmn)
+
+        if nm == 0:
             print('No match!')
         else:
-            if len(warr)*len(self.words_arr) > 30000:
-                print(f'({len(warr)} words match the hints)')
-            tword, n = self._get_best_tword(warr)
-            print(f'Best next word: {iarr2str(tword)} ({n:.2f}/{len(warr)})')
+            print(f'Best next word: {tword} ({nmn:.4g}/{nm})')
 
     def gnt(self, hints):
         """Shorthand notation for get_next_tword() for interactive use.
@@ -582,3 +617,75 @@ class Wordle:
                 print(f'{i+1:4d} {words[i]:<6s} {scores[i]:g}')
         return wlist
 
+    def _get_cache_fpath(self):
+        """Return cache file path for current dataset"""
+        cpath = Path(__file__).resolve().parent / 'cache'
+        if not cpath.exists():
+            cpath.mkdir()
+            print(f'Created {cpath}')
+        cfpath = cpath / f'cache-{self.dataset}.txt'
+        return cfpath
+
+    def build_cache(self, first_word, num=99):
+        """Build cache for given first word (str)
+
+        Set num to small value for testing.
+        """
+        wlen = self.words_arr.shape[1]
+        fw = str(first_word)
+        assert len(fw) == wlen
+        def mkhint(*args):
+            h = ['.'] * wlen
+            for i, let in args:
+                h[i] = let
+            return ''.join(h)
+        hintlist = [(mkhint(), mkhint())]
+        # 1 yellow letter
+        for i, let in enumerate(fw):
+            hintlist.append((mkhint(), mkhint((i, let))))
+        # 1 green letter
+        for i, let in enumerate(fw):
+            hintlist.append((mkhint((i, let)), mkhint()))
+        # 2 yellow letters
+        for i, let in enumerate(fw[:-1]):
+            for j in range(i+1, wlen):
+                hintlist.append((mkhint(), mkhint((i, let), (j, fw[j]))))
+        # 1 green, 1 yellow letter
+        for i, let in enumerate(fw):
+            for j in range(wlen):
+                if i != j:
+                    hintlist.append(
+                        (mkhint((i, let)), mkhint((j, fw[j])))
+                        )
+
+        cfpath = self._get_cache_fpath()
+        cfpath_tmp = Path(f'{cfpath}.tmp')
+
+        with cfpath_tmp.open('w') as f:
+            f.write(
+                '# Cache for dataset={self.dataset}\n'
+                '# first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next\n'
+                )
+            print('Scanning optimal words')
+            for pattern, badpos in hintlist[:num]:
+                warr = self.match_hints(pattern, badpos, fw, mode='return')
+                nw = len(warr)
+                print(f'Trying {pattern} {badpos} {fw} {nw}:')
+                # Get optimal next word
+                if len(warr) == 0:
+                    print('no match!')
+                    line = f'# {fw} {pattern} {badpos} {nw} No_match! 0\n'
+                else:
+                    tword, n = self._get_best_tword(warr)
+                    tword = iarr2str(tword)
+                    print(f'--> {tword} {n:.3g}')
+                    line = f'{fw} {pattern} {badpos} {nw} {tword} {n:.3g}\n'
+                f.write(line)
+                f.flush()
+
+        if cfpath.exists():
+            bakname = f'{cfpath}.bak'
+            cfpath.rename(bakname)
+            print(f'Renamed old cache to {bakname} .')
+        cfpath_tmp.rename(cfpath)
+        print(f'Wrote cache to {cfpath} .')
