@@ -393,6 +393,24 @@ class Wordle:
         out.append(esc('0', ''))  # reset
         return ''.join(out)
 
+    def _get_cache(self, ipat, ibadpos, itword):
+        """Get cache entry (n_match, iword, n_expected) from int word, pattern, badpos;
+        return None if no hit.
+        """
+        tword = iarr2str(itword)
+        pattern = iarr2str(ipat)
+        bp = ['.'] * len(tword)
+        for i, ilet in ibadpos:
+            if bp[i] != '.':
+                return None
+            bp[i] = chr(ilet)
+        bp = ''.join(bp)
+        key = f'{tword} {pattern} {bp}'
+        if key in self.cache:
+            nm, w, nex = self.cache[key]
+            return (nm, str2iarr(w), nex)
+        return None
+
     def count_tries(self, secret_word, first_tword='tenor', maxtries=6, warr=None, verbose=True):
         """Return number of attempts to find the specified word.
 
@@ -402,7 +420,6 @@ class Wordle:
         - first_tword: first try word (int array or str)
         - maxtries: ...
         - warr: all words to match against; (n, 5) int array.
-
 
         Return maxtries+1 if no succes.
 
@@ -424,7 +441,6 @@ class Wordle:
 
         for itry in range(maxtries+1):
             pat1, badpos1, badlet1 = self.gethints_1iword(tword, secret_word)
-            # breakpoint()
             twords.append(tword)
             if np.all(pat1 == tword):
                 break
@@ -443,7 +459,13 @@ class Wordle:
                 itry = maxtries
                 break
             else:
-                tword, _ = self._get_best_tword(warr)
+                if itry == 0:
+                    nb_tw_ne = self._get_cache(pat1, badpos1, tword)
+                    tword = None if nb_tw_ne is None else nb_tw_ne[1]
+                else:
+                    tword = None
+                if tword is None:
+                    tword, n_after = self._get_best_tword(warr)
 
         if verbose:
             color_words = [
@@ -626,7 +648,7 @@ class Wordle:
         cfpath = cpath / f'cache-{self.dataset}.txt'
         return cfpath
 
-    def build_cache(self, first_word, num=99):
+    def build_cache(self, first_word, num=99, start=0):
         """Build cache for given first word (str)
 
         Set num to small value for testing.
@@ -639,25 +661,31 @@ class Wordle:
             for i, let in args:
                 h[i] = let
             return ''.join(h)
-        hintlist = [(mkhint(), mkhint())]
+        hlistY = []
+        hlistG = []
+        hlistYY = []
+        hlistGY = []
+        hlistGG = []
+        hlistYYY = []
         # 1 yellow letter
         for i, let in enumerate(fw):
-            hintlist.append((mkhint(), mkhint((i, let))))
-        # 1 green letter
-        for i, let in enumerate(fw):
-            hintlist.append((mkhint((i, let)), mkhint()))
-        # 2 yellow letters
+            hlistY.append((mkhint(), mkhint((i, let))))
+            hlistG.append((mkhint((i, let)), mkhint()))
         for i, let in enumerate(fw[:-1]):
             for j in range(i+1, wlen):
-                hintlist.append((mkhint(), mkhint((i, let), (j, fw[j]))))
-        # 1 green, 1 yellow letter
+                hlistYY.append((mkhint(), mkhint((i, let), (j, fw[j]))))
+                hlistGG.append((mkhint((i, let), (j, fw[j])), mkhint()))
+                for k in range(j+1, wlen):
+                    hlistYYY.append((mkhint(), mkhint((i, let), (j, fw[j]), (k, fw[k]))))
         for i, let in enumerate(fw):
             for j in range(wlen):
                 if i != j:
-                    hintlist.append(
+                    hlistGY.append(
                         (mkhint((i, let)), mkhint((j, fw[j])))
                         )
-
+        hintlist = ([(mkhint(), mkhint())] + hlistY + hlistG
+                    + hlistYY + hlistGY + hlistGG + hlistYYY
+                    )
         cfpath = self._get_cache_fpath()
         cfpath_tmp = Path(f'{cfpath}.tmp')
 
@@ -667,7 +695,7 @@ class Wordle:
                 '# first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next\n'
                 )
             print('Scanning optimal words')
-            for pattern, badpos in hintlist[:num]:
+            for pattern, badpos in hintlist[start:num]:
                 warr = self.match_hints(pattern, badpos, fw, mode='return')
                 nw = len(warr)
                 print(f'Trying {pattern} {badpos} {fw} {nw}:')
@@ -689,3 +717,4 @@ class Wordle:
             print(f'Renamed old cache to {bakname} .')
         cfpath_tmp.rename(cfpath)
         print(f'Wrote cache to {cfpath} .')
+        self._load_cache()
