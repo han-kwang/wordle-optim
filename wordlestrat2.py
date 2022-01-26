@@ -8,18 +8,19 @@ For online game:
 - https://hellowordl.net/ (English, ~5000 dictionary?)
 - https://woordle.nl/ (Dutch, 860 solutions but recognizes ~5500 words).
 
+It's encapsulated in the Wordle class.
 
 Finding optimal words to try, given hints.
 
 Created on Sat Jan 22 21:25:10 2022 // author: hk_nien
 """
 from time import time
+import re
 import sys
 from pathlib import Path
 from multiprocessing import Pool
 from threadpoolctl import threadpool_limits
 import numpy as np
-import wdata
 
 def str2iarr(words):
     """Convert word (str) list to int16 array. '.' becomes -1.
@@ -60,6 +61,42 @@ def iarr2str(warr):
     return sarr
 
 
+# Words that occur in generic word lists that are not recognized.
+BLACKLISTS = {
+    # For original Wordle
+    'en-2700': {'alton', 'ethan', 'aires', 'aries', 'bligh'}
+    }
+
+_FIRST_WORDS = {
+    # Dataset name -> (word, n_expected)
+    # in comments: other words and calculation time (2 cores, 4 threads)
+    'en': ('raise', 61.0),  # arise (63.7), irate (63.8) / 22min
+    'en-2700': ('raise', 99),
+    'en-full': ('raise', 99),
+    'en-hello': ('raise', 99),
+    'nl': ('tenor', 22),
+}
+
+
+def _load_wlist(fname, wlen=5, maxnum=99999, iarr=False, blacklist_key=None):
+    """Load word list (list of str or iarray) from file."""
+    if blacklist_key is None or blacklist_key not in BLACKLISTS:
+        blacklist = set()
+    else:
+        blacklist = BLACKLISTS[blacklist_key]
+    exp = re.compile(f'[a-zA-Z]{{{wlen}}}$', re.I)
+    with open(fname) as f:
+        wlist = [
+            w[:-1].lower()
+            for w in f
+            if exp.match(w)
+            ]
+    wlist = [w for w in wlist if w not in blacklist]
+    wlist = wlist[:maxnum]
+    if iarr:
+        wlist = str2iarr(wlist)
+    return wlist
+
 # Data for workers is stored here.
 _WORKER_PERSISTENT = {}
 
@@ -91,15 +128,28 @@ def _test_1word(tword):
         nmatch[j] = len(matches)
     return nmatch.mean()
 
+
 class Wordle:
     """Wordle player/hinter/searcher.
 
     Strings are handled as numpy int16 arrays; positive values for
     unicode/ascii characters and value -1 for 'undefined/unknown'.
 
+    Word lists are 'a' and 'b' lists. a=list of possible solutions.
+    b=list of recognized words.
+
+    Initialization parameters:
+
+    - dataset: str: one of:
+
+      - 'nl': Dutch word list (a:865, b:5541)
+      - 'en': Reduced Wordle list (a:2315, b:3911)
+      - 'en-hello': List for Hello Wordl (a:3500, b:4100)
+      - 'en-2700': English word list (2700 words)
+      - 'en-full': Original Wordle list (a:2315, b:10657)
+
     Functions with string interface:
 
-    - init(): load/initialize dictionaries
     - count_tries(): Return number of attempts to find the specified word.
     - find_optimal_first_word(): Find optimal first word. This is slow.
     - get_next_tword(): Suggest next word to try
@@ -120,8 +170,10 @@ class Wordle:
 
     - self.alphabet: int16 array with alphabet, typically length 26 (lowercase).
       Must be consecutive (no gaps).
-    - self.words_arr: puzzle word array, shape (n, 5)
-    - self.words_arr_big: recognized word array, shape (nn, 5).
+    - self.warr_a: puzzle word array, shape (n, 5)
+    - self.warr_b: recognized word array, shape (nn, 5).
+    - first_word: optimal first word
+    - first_word_
     - dataset: dataset used for initialization (do not modify).
     - cache: dictionary with keys '<firstword> <pattern> <badpos>',
       values (num_match, next_word, num_match_next)
@@ -129,25 +181,51 @@ class Wordle:
     def __init__(self, dataset='nl'):
         """Initialize for 'nl', 'en-orig', or 'en-hello'."""
         self.alphabet = np.arange(26, dtype=np.int16) + ord('a')
+        self.dataset = str(dataset)
+        self.first_word, self.first_word_expected = _FIRST_WORDS[dataset]
         if dataset == 'nl':
-            wdata.init('nlbig')
-            self.words_arr_big = str2iarr(wdata.WORDS)
-            wdata.init('nl')
-            self.words_arr = str2iarr(wdata.WORDS)
-        elif dataset == 'en-orig':
-            wdata.init('en')
-            self.words_arr = self.words_arr_big = str2iarr(wdata.WORDS)
+            self.warr_b = _load_wlist('data/woordle-nl-b.txt', iarr=True)
+            self.warr_a = _load_wlist('data/woordle-nl-a.txt', iarr=True)
+            self.first_word = 'tenor'
+        elif dataset == 'en-2700':
+            self.warr_a = _load_wlist(
+                'data/wordlist-en-freq.txt', maxnum=2700, iarr=True,
+                blacklist_key=dataset
+                )
+            self.warr_b = self.warr_a
+            self.first_word = 'raise'
+        elif dataset == 'en-full':
+            self.warr_a = _load_wlist('data/wordle-en-a.txt', iarr=True)
+            self.warr_b = _load_wlist('data/wordle-en-b.txt', iarr=True)
+        elif dataset == 'en':
+            warr_a = _load_wlist('data/wordle-en-a.txt', iarr=False)
+            warr_b1 = _load_wlist('data/wordle-en-b.txt', iarr=False)
+            warr_b2 = _load_wlist('data/wordlist-en-freq.txt', iarr=False)
+            warr_b2 = set(warr_a).union(set(warr_b1).intersection(warr_b2))
+            self.warr_a = str2iarr(warr_a)
+            self.warr_b = str2iarr(sorted(warr_b2))
         elif dataset == 'en-hello':
-            wdata.init('enbig')
-            self.words_arr = self.words_arr_big = str2iarr(wdata.WORDS)
+            self.warr_a = _load_wlist('data/wordlist-en-freq.txt', maxnum=3500, iarr=True)
+            self.warr_b = _load_wlist('data/wordlist-en-freq.txt', maxnum=4200, iarr=True)
+            self.warr_a = self.warr_b
+            self.first_word = 'raise'
         else:
             raise ValueError(f'dataset={dataset!r}')
-        self.dataset = str(dataset)
         self.cache = self._load_cache()
+
+
+    def _apply_blacklist(self, words):
+        """Apply to list of str and return new list of str."""
+        if self.dataset not in BLACKLISTS:
+            return words
+        bl = BLACKLISTS[self.dataset]
+        words_2 = [w for w in words if w not in bl]
+        return words_2
 
     def __repr__(self):
         cn = self.__class__.__name__
-        return(f'{cn}({self.dataset!r})')
+        na, nb = len(self.warr_a), len(self.warr_b)
+        return f'<{cn}: {self.dataset!r}, num_a={na}, num_b={nb}>'
 
     def _load_cache(self):
         """Load and return cache dict."""
@@ -168,6 +246,16 @@ class Wordle:
                 cache[key] = (int(fields[3]), fields[4], float(fields[5]))
         return cache
 
+    @staticmethod
+    def i2s(iarr):
+        """Convert int16 array to string or string list"""
+        return iarr2str(iarr)
+
+    @staticmethod
+    def s2i(s):
+        """Convert string or string list to int16 array."""
+        return str2iarr(s)
+
     def imatch_hints(self, pattern, badpos, badlets, warr=None):
         """Match vocabulary (int representation) against hints.
 
@@ -183,7 +271,7 @@ class Wordle:
         - warr_match: matching words array (n, 5)
         """
         if warr is None:
-            warr_match = self.words_arr
+            warr_match = self.warr_a
         else:
             assert warr.ndim == 2 and warr.dtype == np.int16
             warr_match = warr
@@ -207,7 +295,7 @@ class Wordle:
             if warr_match.shape[0] == 0:
                 return warr_match
 
-        if warr_match is self.words_arr or warr_match is warr:
+        if warr_match is self.warr_a or warr_match is warr:
             warr_match = warr_match.copy()
 
         return warr_match
@@ -229,7 +317,7 @@ class Wordle:
         - badletss: (n, 26) bool array, True for bad letters.
         """
         if warr is None:
-            warr = self.words_arr
+            warr = self.warr_a
         else:
             assert warr.dtype==np.int16
         nw, wsize = warr.shape
@@ -275,7 +363,7 @@ class Wordle:
         Parameters:
 
         - tword: try word (str or int16 array).
-        - warr: vocabulary array (int array); default self.words_arr.
+        - warr: vocabulary array (int array); default self.warr_a.
 
         Return:
 
@@ -284,13 +372,22 @@ class Wordle:
         if isinstance(tword, str):
             tword = str2iarr(tword)
         if warr is None:
-            warr = self.words_arr
+            warr = self.warr_a
         _WORKER_PERSISTENT['warr'] = warr
         _WORKER_PERSISTENT['wordle_obj'] = self
         mnm = _test_1word(tword)
         for k in ['warr', 'wordle_obj']:
             del _WORKER_PERSISTENT[k]
         return np.around(mnm, 3)
+
+    def get_optimal_first_word(self):
+        """Find optimal first word from self.warr_b. Warning: slow!
+
+        This will update self.first_word and self.first_n_expect.
+        """
+        iwords, nex = self.test_words(self.warr_a, self.warr_b)
+        self.first_word = iarr2str(iwords[0])
+        self.first_n_expect = np.around(nex, 3)
 
     def test_words(self, warr, twarr=None, nshow=3, pri_time=2):
         """Test all vocabulary words for selectivity.
@@ -361,7 +458,7 @@ class Wordle:
             tword = warr[0]
             n = max(1, len(warr)-1)
         else:
-            twords1, scores = self.test_words(warr, self.words_arr, nshow=0, pri_time=3)
+            twords1, scores = self.test_words(warr, self.warr_a, nshow=0, pri_time=3)
             # get all candidate words that are optimal
             n = scores[0]
             twords1 = twords1[scores == n]
@@ -411,41 +508,55 @@ class Wordle:
             return (nm, str2iarr(w), nex)
         return None
 
-    def count_tries(self, secret_word, first_tword='tenor', maxtries=6, warr=None, verbose=True):
+    def count_tries(self, secret_word, first_tword=None, maxtries=6, warr=None, verbose=True):
         """Return number of attempts to find the specified word.
 
         Parameters:
 
         - secret_word: secret word (int array or str)
-        - first_tword: first try word (int array or str)
+        - first_tword: first try word (int array or str) (optional)
         - maxtries: ...
         - warr: all words to match against; (n, 5) int array.
+        - verbose: True to show the words and statistics.
 
         Return maxtries+1 if no succes.
 
         This includes the first word as provided and the word as found.
+
+        Output for verbose=True:
+
+        - test words, color-coded
+        - (n_expected / n_match): number of remaining words that match the
+          hints as expected and actual value.
         """
-        tword = first_tword
+        tword = self.first_word if first_tword is None else first_tword
         if isinstance(tword, str):
             tword = str2iarr(tword)
         if isinstance(secret_word, str):
             secret_word = str2iarr(secret_word)
         if warr is None:
-            warr = self.words_arr
+            warr = self.warr_a
 
         wlen = len(tword)
         pat = np.full(wlen, np.int16(-1))
         badpos = set()
         badlet = set()
-        twords = []
+        twords_stats = []  # lists [tword, n_before, n_expected, n_after]
+        is_solved = False
+        n_expected = '?'
 
         for itry in range(maxtries+1):
-            pat1, badpos1, badlet1 = self.gethints_1iword(tword, secret_word)
-            twords.append(tword)
-            if np.all(pat1 == tword):
-                break
+            # At the beginning of each iteration:
+            # - tword: next test word to apply
+            # - twords_stats: does not yet contain this test word
+            # - hints: previously existing hints (pat, badpos, badlet)
+            # - warr: remaining candidate words after applying previous hints
+            # - n_expected: number of remaining words expected after applying
+            #   the next test word.
 
-            # merge hints
+            n_before = len(warr)
+            # Try the test word, merge hints
+            pat1, badpos1, badlet1 = self.gethints_1iword(tword, secret_word)
             for i, let in enumerate(pat1):
                 if let > 0:
                     pat[i] = let
@@ -453,31 +564,43 @@ class Wordle:
                 badpos.add((i, let))
             for let in badlet1:
                 badlet.add(let)
+
+            # Solved?
+            if np.all(pat1 == tword):
+                twords_stats.append([tword, n_before, n_expected, 1])
+                is_solved = True
+                break
+
             # get words that match the hints
             warr = self.imatch_hints(pat, badpos, badlet, warr)
+            twords_stats.append([tword, n_before, n_expected, len(warr)])
             if len(warr) == 0:
-                itry = maxtries
                 break
+
+            # Find next test word from cache or from brute force
+            if itry == 0:
+                nb_tw_ne = self._get_cache(pat1, badpos1, tword)
             else:
-                if itry == 0:
-                    nb_tw_ne = self._get_cache(pat1, badpos1, tword)
-                    tword = None if nb_tw_ne is None else nb_tw_ne[1]
-                else:
-                    tword = None
-                if tword is None:
-                    tword, n_after = self._get_best_tword(warr)
+                nb_tw_ne = None
+            if nb_tw_ne is None:
+                tword, n_expected = self._get_best_tword(warr)
+            else:
+                tword, n_expected = nb_tw_ne[1:]
+            n_expected = f'{n_expected:.3g}'
+            # end of loop
 
         if verbose:
-            color_words = [
-                self.color_str_try(iarr2str(secret_word), iarr2str(tw))
-                for tw in twords
-                ]
-            if itry >= maxtries:
+            summary = []
+            for tword, _, n_expected, n_after in twords_stats:
+                tword = self.color_str_try(iarr2str(secret_word), iarr2str(tword))
+                txt = f'{tword} ({n_expected}/{n_after})'
+                summary.append(txt)
+            if not is_solved:
                 msg = '\033[31;1m  (Not found)\033[0m'
             else:
                 msg = ''
-            print(f'{iarr2str(secret_word)}: {", ".join(color_words)}{msg}')
-        return itry+1
+            summary = ' → '.join(summary)
+            print(f'{iarr2str(secret_word)}: {summary}{msg}')
 
     def match_hints(self, pattern, badpos, twords, mode='print'):
         """Show or return words that match the hints; human-friendly.
@@ -556,7 +679,7 @@ class Wordle:
             nm = len(warr)
             # Get optimal next word
             if nm > 0:
-                if nm*len(self.words_arr) > 30000:
+                if nm*len(self.warr_a) > 30000:
                     print(f'({len(warr)} words match the hints)')
                 tword, nmn = self._get_best_tword(warr)
                 tword = iarr2str(tword)
@@ -566,6 +689,64 @@ class Wordle:
             print('No match!')
         else:
             print(f'Best next word: {tword} ({nmn:.4g}/{nm})')
+
+    def play_ai(self, first_word=None, maxtries=6):
+        """Interactive play against human or website.
+
+        TODO This doesn't work very well; sometimes misses the solution.
+        """
+        tword = self.first_word if first_word is None else first_word
+        wlen = len(tword)
+        print('Example response: .a.T. -> a has wrong position, T is correct.')
+        ipattern = np.full(wlen, np.int16(-1))
+        ibadpos = set()
+        ibadlet = set()
+        warr = self.warr_a
+        itry = 0
+        while True:
+            # get/parse user input
+            try:
+                r = input(f'Try "{tword}", what is the response? >')
+            except EOFError:
+                print('  Aborted.')
+                break
+            if len(r) != wlen:
+                print(f'  Wrong length, expected {wlen}. Try again.')
+                continue
+            if r == tword.upper():
+                print('  Gotcha!')
+                break
+            elif itry == maxtries - 1:
+                print('  Game over')
+                break
+            for i, let in enumerate(r):
+                ilet = ord(let.lower())
+                if let.isupper():
+                    ipattern[i] = ilet
+                else:
+                    if let == '.':
+                        ibadlet.add(ord(tword[i]))
+                    else:
+                        ibadpos.add((i, ilet))
+            # get next test word
+            warr = self.imatch_hints(ipattern, ibadpos, ibadlet, warr)
+            print(
+                f'  Remaining: {len(warr)}: {", ".join(iarr2str(warr[:7]))}'
+                f'{", ..." if len(warr) > 7 else "."}'
+                )
+
+            if len(warr) == 0:
+                print('  Giving up!')
+                break
+            if itry == 0:
+                nb_tw_ne = self._get_cache(ipattern, ibadpos, str2iarr(tword))
+                tword = None if nb_tw_ne is None else nb_tw_ne[1]
+            else:
+                tword = None
+            if tword is None:
+                tword, _ = self._get_best_tword(warr)
+            tword = iarr2str(tword)
+            itry += 1
 
     def gnt(self, hints):
         """Shorthand notation for get_next_tword() for interactive use.
@@ -595,7 +776,7 @@ class Wordle:
         Parameters:
 
         - select: indicate dictionary size to work with; 0: small for testing;
-          1: select words from self.words_arr; 2: select from self.words_arr_big.
+          1: select words from self.warr_a; 2: select from self.warr_b.
         - ret_full: True to return full list; False to return best 10 and
           another 10 picked from the rest.
 
@@ -610,11 +791,11 @@ class Wordle:
         raise (57.9), arise (61.7), rates (62), ..., fuzzy (1202)
         """
         if select == 0:
-            warr, twarr = self.words_arr[::5], self.words_arr[::5]
+            warr, twarr = self.warr_a[::5], self.warr_a[::5]
         elif select == 1:
-            warr, twarr = self.words_arr, self.words_arr
+            warr, twarr = self.warr_a, self.warr_a
         elif select == 2:
-            warr, twarr = self.words_arr, self.words_arr_big
+            warr, twarr = self.warr_a, self.warr_b
         else:
             raise ValueError(f'select={select}')
         words, scores = self.test_words(warr, twarr)
@@ -648,13 +829,13 @@ class Wordle:
         cfpath = cpath / f'cache-{self.dataset}.txt'
         return cfpath
 
-    def build_cache(self, first_word, num=99, start=0):
+    def build_cache(self, num=99, start=0):
         """Build cache for given first word (str)
 
         Set num to small value for testing.
         """
-        wlen = self.words_arr.shape[1]
-        fw = str(first_word)
+        wlen = self.warr_a.shape[1]
+        fw = self.first_word
         assert len(fw) == wlen
         def mkhint(*args):
             h = ['.'] * wlen
@@ -688,13 +869,12 @@ class Wordle:
                     )
         cfpath = self._get_cache_fpath()
         cfpath_tmp = Path(f'{cfpath}.tmp')
-
         with cfpath_tmp.open('w') as f:
             f.write(
                 '# Cache for dataset={self.dataset}\n'
                 '# first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next\n'
                 )
-            print('Scanning optimal words')
+            print('Scanning optimal words (first_word={fw}, dataset={self.dataset})')
             for pattern, badpos in hintlist[start:num]:
                 warr = self.match_hints(pattern, badpos, fw, mode='return')
                 nw = len(warr)

@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Sat Jan 15 12:54:43 2022
+"""Experimentation script.
 
-@author: hk_nien
+Analysis based on letter frequencies and letter frequencies resolved by
+position. Main purpose is to generate optimal starter words for humans
+to use to catch as many letters as possible.
+
+This script evolved from a few lines of trial and error, so it is not well
+structured. I started over with a different and better approach in
+wordlestat2.py.
+
+Created on Sat Jan 15 12:54:43 2022 // author: @hk_nien on Twitter.
 """
 
 import re
@@ -41,7 +48,7 @@ def get5words_en_2(n=2700):
 
     Corpus size 2700 seems to be about what Wordle uses.
     """
-    words = open('wordlist-en-freq.txt').read().split('\n')
+    words = open('data/wordlist-en-freq.txt').read().split('\n')
     exp = re.compile('[A-Za-z]{5}$')
     words = [
         w.lower()
@@ -50,18 +57,14 @@ def get5words_en_2(n=2700):
         ]
     return words[:n]
 
-
-
-
 def get5words_nl():
     return _get5words(
-        ['woordle-nl.txt'],
+        ['data/woordle-nl-a.txt'],
         blacklist={
             'aties','olink', 'molin', 'limon', 'leoni', 'pilon',
             'budak', 'bedum', 'dumps'
             }
         )
-
 
 def getletfreq():
     """Return LFREQ"""
@@ -197,7 +200,6 @@ def match_1word(word, pwords):
                 badlets_p[i].add(pw[i])
 
     return hits1, hits2, wlets, badlets, badlets_p
-
 
 
 def evaluate_1word_fast(word, pwords, verbose=False, w1=0.5, ret_full=False):
@@ -542,5 +544,5 @@ def search(regexp, good_letters, tried_letters):
 
 if __name__ == '__main__':
     # run_en(hyperscan=True, n_corpus=1200)
-    run_nl(hyperscan=True,w1=0.5)
-
+    run_nl(hyperscan=True, w1=0.5)
+    run_en(hyperscan=True)
