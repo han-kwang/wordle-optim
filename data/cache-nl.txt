@@ -1,0 +1,63 @@
+# Cache for dataset={self.dataset}
+# first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next
+tenor ..... ..... 47 kluis 1.38
+tenor ..... t.... 39 slijm 2.33
+tenor ..... .e... 41 kluis 1.93
+tenor ..... ..n.. 22 blaas 1.45
+tenor ..... ...o. 27 saldo 1.52
+tenor ..... ....r 38 kruid 2.11
+tenor t.... ..... 4 talig 1
+tenor .e... ..... 35 gilde 2.66
+tenor ..n.. ..... 11 datum 1.18
+tenor ...o. ..... 10 sloop 1.2
+tenor ....r ..... 5 zwaar 1
+tenor ..... te... 22 steil 1.82
+tenor ..... t.n.. 11 slank 1
+tenor ..... t..o. 17 modus 1.59
+tenor ..... t...r 21 haaks 1.48
+tenor ..... .en.. 42 daken 3.81
+tenor ..... .e.o. 27 vlieg 1.96
+tenor ..... .e..r 24 breed 2.25
+tenor ..... ..no. 11 slang 1
+tenor ..... ..n.r 13 gebak 1
+tenor ..... ...or 16 dogma 1.62
+tenor t.... .e... 4 tabel 1
+tenor t.... ..n.. 1 thans 1
+tenor t.... ...o. 1 tocht 1
+tenor t.... ....r 4 tiara 1
+tenor .e... t.... 22 sabel 2.36
+tenor .e... ..n.. 23 gilde 3.61
+tenor .e... ...o. 2 cello 1
+tenor .e... ....r 12 abuis 1.33
+tenor ..n.. t.... 4 dunkt 1
+tenor ..n.. .e... 9 balie 1
+tenor ..n.. ...o. 3 banjo 1
+# tenor ..n.. ....r 0 No_match! 0
+tenor ...o. t.... 10 stopt 1.2
+# tenor ...o. .e... 0 No_match! 0
+tenor ...o. ..n.. 7 plots 1
+tenor ...o. ....r 6 droog 1
+tenor ....r t.... 1 stuur 1
+tenor ....r .e... 26 dames 2.54
+tenor ....r ..n.. 1 snaar 1
+# tenor ....r ...o. 0 No_match! 0
+tenor te... ..... 2 teelt 1
+# tenor t.n.. ..... 0 No_match! 0
+# tenor t..o. ..... 0 No_match! 0
+tenor t...r ..... 1 tsaar 1
+tenor .en.. ..... 7 godin 1
+tenor .e.o. ..... 1 gedoe 1
+tenor .e..r ..... 11 vloek 2.09
+tenor ..no. ..... 2 canon 1
+# tenor ..n.r ..... 0 No_match! 0
+tenor ...or ..... 3 ivoor 1
+tenor ..... ten.. 10 laden 1
+tenor ..... te.o. 17 split 1.35
+tenor ..... te..r 6 alert 1
+tenor ..... t.no. 3 joint 1
+tenor ..... t.n.r 2 krant 1
+tenor ..... t..or 11 woord 1.91
+tenor ..... .eno. 13 model 1.77
+tenor ..... .en.r 17 jarig 1.94
+tenor ..... .e.or 14 groep 1.43
+tenor ..... ..nor 6 grond 1
