@@ -1,0 +1,7 @@
+woordle-nl-a.txt  woordle.nl puzzle words
+woordle-nl-b.txt  woordle.nl recognized words
+wordle-en-a.txt   wordle puzzle words
+wordle-en-b.txt   wordle recognized words
+wordlist-en-freq.txt  English vocabulary sorted by frequency from
+                      Project Gutenberg /
+                      https://en.wiktionary.org/wiki/Wiktionary:Frequency_lists#English
