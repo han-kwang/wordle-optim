@@ -9,7 +9,7 @@ from wordlestrat2 import Wordle
 
 if __name__ == '__main__':
 
-    wrd = Wordle('nl')
+    wrd = Wordle('en')
     if 0:
         # This is slow; run this with F9 only.
         wrd.find_optimal_first_word(select=1)
@@ -20,12 +20,12 @@ if __name__ == '__main__':
     if 0:
         print('Demo: how it would find words:')
         for w in wrd.words_arr[::len(wrd.words_arr)//5]:
-            wrd.count_tries(w, 'tenor')
+            wrd.count_tries(w)
     if 1:
         print('Demo: playing')
-        twords = 'toren/gebak' # words as tried
-        pattern = '...e.' # green letters (position correct)
-        badpos = '..r../ge.a.' # yellow letters (wrong position)
+        twords = 'raise/count' # words as tried
+        pattern = '.a..e' # green letters (position correct)
+        badpos = '...../....t' # yellow letters (wrong position)
         print(f'Tried: {twords}; hits: {pattern}; bad position: {badpos}')
         wrd.get_next_tword(pattern, badpos, twords)
         wrd.match_hints(pattern, badpos, twords)

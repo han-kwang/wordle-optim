@@ -71,10 +71,10 @@ _FIRST_WORDS = {
     # Dataset name -> (word, n_expected)
     # in comments: other words and calculation time (2 cores, 4 threads)
     'en': ('raise', 61.0),  # arise (63.7), irate (63.8) / 22min
-    'en-2700': ('raise', 99),
-    'en-full': ('raise', 99),
-    'en-hello': ('raise', 99),
-    'nl': ('tenor', 22),
+    'en-2700': ('raise', 57.9),  # didn't update
+    'en-full': ('roate', 60.4), # raise (61.0) raile (61.3), soare (62.5) / 1h03m
+    'en-hello': ('raise', 95.4),
+    'nl': ('tenor', 21.6),
 }
 
 
@@ -138,15 +138,17 @@ class Wordle:
     Word lists are 'a' and 'b' lists. a=list of possible solutions.
     b=list of recognized words.
 
-    Initialization parameters:
-
-    - dataset: str: one of:
+    Initialize with dataset, which is one of:
 
       - 'nl': Dutch word list (a:865, b:5541)
       - 'en': Reduced Wordle list (a:2315, b:3911)
       - 'en-hello': List for Hello Wordl (a:3500, b:4100)
       - 'en-2700': English word list (2700 words)
       - 'en-full': Original Wordle list (a:2315, b:10657)
+
+    To get the list of dataset names, use::
+
+        Wordle.get_datasets()
 
     Functions with string interface:
 
@@ -178,8 +180,13 @@ class Wordle:
     - cache: dictionary with keys '<firstword> <pattern> <badpos>',
       values (num_match, next_word, num_match_next)
     """
-    def __init__(self, dataset='nl'):
-        """Initialize for 'nl', 'en-orig', or 'en-hello'."""
+    @classmethod
+    def get_datasets(cls):
+        """Return list of supported dataset names."""
+        return ['nl', 'en-2700', 'en-full', 'en', 'en-hello']
+
+    def __init__(self, dataset='en'):
+        """Initialize, see class doc."""
         self.alphabet = np.arange(26, dtype=np.int16) + ord('a')
         self.dataset = str(dataset)
         self.first_word, self.first_word_expected = _FIRST_WORDS[dataset]
@@ -210,7 +217,7 @@ class Wordle:
             self.warr_a = self.warr_b
             self.first_word = 'raise'
         else:
-            raise ValueError(f'dataset={dataset!r}')
+            raise ValueError(f'dataset={dataset!r} / try get_all() method.')
         self.cache = self._load_cache()
 
 
@@ -422,7 +429,7 @@ class Wordle:
                 for i, a in enumerate(asyncs):
                     mean_nmatchs.append(a.get())
                     tm = time()
-                    if tm - tm_prev > 1 and tm - tm_start > pri_time:
+                    if tm - tm_start > pri_time and (tm - tm_prev > 1 or i == ntw-1):
                         print(f'\rtest_words {i+1}/{ntw}...', end='')
                         tm_prev = tm
         else:
@@ -823,10 +830,19 @@ class Wordle:
     def _get_cache_fpath(self):
         """Return cache file path for current dataset"""
         cpath = Path(__file__).resolve().parent / 'cache'
+        dpath = Path(__file__).resolve().parent / 'data'
         if not cpath.exists():
             cpath.mkdir()
             print(f'Created {cpath}')
         cfpath = cpath / f'cache-{self.dataset}.txt'
+
+        if not cfpath.is_file():
+            cfpath_dist = (dpath / cfpath.name)
+            if cfpath_dist.is_file():
+                print(f'No cache; copying default cache to {cfpath}')
+                with cfpath_dist.open() as f1, cfpath.open('w') as f2:
+                    f2.write(f1.read())
+
         return cfpath
 
     def build_cache(self, num=99, start=0):
@@ -874,7 +890,7 @@ class Wordle:
                 '# Cache for dataset={self.dataset}\n'
                 '# first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next\n'
                 )
-            print('Scanning optimal words (first_word={fw}, dataset={self.dataset})')
+            print(f'Scanning optimal words (first_word={fw}, dataset={self.dataset})')
             for pattern, badpos in hintlist[start:num]:
                 warr = self.match_hints(pattern, badpos, fw, mode='return')
                 nw = len(warr)

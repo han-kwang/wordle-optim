@@ -7,8 +7,8 @@ position. Main purpose is to generate optimal starter words for humans
 to use to catch as many letters as possible.
 
 This script evolved from a few lines of trial and error, so it is not well
-structured. I started over with a different and better approach in
-wordlestat2.py.
+structured. Too many global variables.
+I started over with a different and better approach in wordlestat2.py.
 
 Created on Sat Jan 15 12:54:43 2022 // author: @hk_nien on Twitter.
 """
