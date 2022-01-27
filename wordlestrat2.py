@@ -327,20 +327,33 @@ class Wordle:
             warr = self.warr_a
         else:
             assert warr.dtype==np.int16
+        warr = warr.copy()  # we're going to replace matched letters by -1
         nw, wsize = warr.shape
 
         patterns = np.full((nw, wsize), np.int16(-1))
         badposs = patterns.copy()
         badletss = np.full((nw, len(self.alphabet)), False)
         irange = np.arange(nw)
+        masks = []
         for i, let in enumerate(iword):
             mask = (warr[:, i] == let)
             patterns[mask, i] = let
+            warr[mask, i] = -1 # this is to prevent double counting
+            masks.append(mask)
+
+        for i, (let, mask) in enumerate(zip(iword, masks)):
+            # Correct letters in wrong positions.
+            # Recurring letters in test words are tricky.
+            #            tword solution pattern badpos batlets
+            #   CORRECT  foo   zob      .o.     ...    f
+            #   WRONG    foo   zob      .o.     ..o    f
+            #   WRONG    foo   zob      .o.     ...    f,o
             mask2 = np.any(warr[~mask, :] == let, axis=1)
             ii = irange[~mask][mask2]
             badposs[ii, i] = let
             j = let - self.alphabet[0]
-            badletss[~np.any(warr == let, axis=1), j] = True
+            mask3 = ~np.any(warr == let, axis=1) & ~np.any(patterns == let, axis=1)
+            badletss[mask3, j] = True
 
         return patterns, badposs, badletss
 
@@ -699,8 +712,6 @@ class Wordle:
 
     def play_ai(self, first_word=None, maxtries=6):
         """Interactive play against human or website.
-
-        TODO This doesn't work very well; sometimes misses the solution.
         """
         tword = self.first_word if first_word is None else first_word
         wlen = len(tword)
@@ -723,9 +734,21 @@ class Wordle:
             if r == tword.upper():
                 print('  Gotcha!')
                 break
+            if r == tword:
+                print(f'Did you mean {tword.upper()!r} rather than {tword!r}?')
+                continue
             elif itry == maxtries - 1:
                 print('  Game over')
                 break
+            good_response = True
+            for (twl, rl) in zip(tword, r):
+                if rl not in ('.', twl, twl.upper()):
+                    print(f"This response doesn't match {tword!r}")
+                    good_response = False
+                    break
+            if not good_response:
+                continue
+
             for i, let in enumerate(r):
                 ilet = ord(let.lower())
                 if let.isupper():

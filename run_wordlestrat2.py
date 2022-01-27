@@ -17,9 +17,9 @@ if __name__ == '__main__':
         # This is very slow; run this with F9 only.
         wrd.find_optimal_first_word(select=2)
 
-    if 0:
+    if 1:
         print('Demo: how it would find words:')
-        for w in wrd.words_arr[::len(wrd.words_arr)//5]:
+        for w in wrd.warr_a[::len(wrd.warr_a)//5]:
             wrd.count_tries(w)
     if 1:
         print('Demo: playing')
@@ -29,4 +29,3 @@ if __name__ == '__main__':
         print(f'Tried: {twords}; hits: {pattern}; bad position: {badpos}')
         wrd.get_next_tword(pattern, badpos, twords)
         wrd.match_hints(pattern, badpos, twords)
-
