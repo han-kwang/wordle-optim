@@ -19,6 +19,7 @@ import re
 import sys
 from pathlib import Path
 from multiprocessing import Pool
+import os
 from threadpoolctl import threadpool_limits
 import numpy as np
 
@@ -73,7 +74,8 @@ _FIRST_WORDS = {
     'en': ('raise', 61.0),  # arise (63.7), irate (63.8) / 22min
     'en-2700': ('raise', 57.9),  # didn't update
     'en-full': ('roate', 60.4), # raise (61.0) raile (61.3), soare (62.5) / 1h03m
-    'en-hello': ('raise', 95.4),
+    'en-hello': ('raise', 83.5),
+    'en-hello-full': ('soare', 82.8), # , raise (83.5), raile (83.6)
     'nl': ('tenor', 21.6),
 }
 
@@ -128,6 +130,12 @@ def _test_1word(tword):
         nmatch[j] = len(matches)
     return nmatch.mean()
 
+def _set_nice(target=10):
+    """Increase nice value of process."""
+    current_nice = os.nice(0)
+    inc = max(0, target - current_nice)
+    os.nice(inc)
+
 
 class Wordle:
     """Wordle player/hinter/searcher.
@@ -142,7 +150,8 @@ class Wordle:
 
       - 'nl': Dutch word list (a:865, b:5541)
       - 'en': Reduced Wordle list (a:2315, b:3911)
-      - 'en-hello': List for Hello Wordl (a:3500, b:4100)
+      - 'en-hello': List for Hello Wordl (a:3270, b:3270)
+      - 'en-hello-full': List for Hello Wordl (a:3270, b: 12970)
       - 'en-2700': English word list (2700 words)
       - 'en-full': Original Wordle list (a:2315, b:10657)
 
@@ -183,7 +192,7 @@ class Wordle:
     @classmethod
     def get_datasets(cls):
         """Return list of supported dataset names."""
-        return ['nl', 'en-2700', 'en-full', 'en', 'en-hello']
+        return ['nl', 'en-2700', 'en-full', 'en', 'en-hello', 'en-hello-full']
 
     def __init__(self, dataset='en'):
         """Initialize, see class doc."""
@@ -193,14 +202,12 @@ class Wordle:
         if dataset == 'nl':
             self.warr_b = _load_wlist('data/woordle-nl-b.txt', iarr=True)
             self.warr_a = _load_wlist('data/woordle-nl-a.txt', iarr=True)
-            self.first_word = 'tenor'
         elif dataset == 'en-2700':
             self.warr_a = _load_wlist(
                 'data/wordlist-en-freq.txt', maxnum=2700, iarr=True,
                 blacklist_key=dataset
                 )
             self.warr_b = self.warr_a
-            self.first_word = 'raise'
         elif dataset == 'en-full':
             self.warr_a = _load_wlist('data/wordle-en-a.txt', iarr=True)
             self.warr_b = _load_wlist('data/wordle-en-b.txt', iarr=True)
@@ -211,11 +218,12 @@ class Wordle:
             warr_b2 = set(warr_a).union(set(warr_b1).intersection(warr_b2))
             self.warr_a = str2iarr(warr_a)
             self.warr_b = str2iarr(sorted(warr_b2))
+        elif dataset == 'en-hello-full':
+            self.warr_a = _load_wlist('data/hello_wordl-a.txt', iarr=True)
+            self.warr_b = _load_wlist('data/hello_wordl-b.txt', iarr=True)
         elif dataset == 'en-hello':
-            self.warr_a = _load_wlist('data/wordlist-en-freq.txt', maxnum=3500, iarr=True)
-            self.warr_b = _load_wlist('data/wordlist-en-freq.txt', maxnum=4200, iarr=True)
-            self.warr_a = self.warr_b
-            self.first_word = 'raise'
+            self.warr_a = _load_wlist('data/hello_wordl-a.txt', iarr=True)
+            self.warr_b = self.warr_a
         else:
             raise ValueError(f'dataset={dataset!r} / try get_all() method.')
         self.cache = self._load_cache()
@@ -434,7 +442,7 @@ class Wordle:
         mean_nmatchs = []
         if sys.platform == 'linux' and len(twarr) >= 3:
             # Parallellized
-            with threadpool_limits(limits=1), Pool() as pool:
+            with threadpool_limits(limits=1), Pool(initializer=_set_nice) as pool:
                 asyncs = [
                     pool.apply_async(_test_1word, (tw,))
                     for tw in twarr
@@ -637,6 +645,7 @@ class Wordle:
         - warr: list of matching words (as int array)
         """
         # Parse
+        pattern, badpos, twords = pattern.lower(), badpos.lower(), twords.lower()
         pattern = str2iarr(pattern)
         wlen = len(pattern)
         goodletters = set([let for let in pattern if let != -1])
@@ -685,6 +694,7 @@ class Wordle:
         - badpos: e.g. 'z..../bl.../....k' (letters at green positions)
         - twords: e.g. 'zuster/bloem/draak'
         """
+        pattern, badpos, twords = pattern.lower(), badpos.lower(), twords.lower()
         cache_key = f'{twords} {pattern} {badpos}'
         if cache_key in self.cache:
             nm, tword, nmn = self.cache[cache_key]
@@ -749,7 +759,7 @@ class Wordle:
             if not good_response:
                 continue
 
-            for i, let in enumerate(r):
+            for i, (let, tlet) in enumerate(zip(r, tword)):
                 ilet = ord(let.lower())
                 if let.isupper():
                     ipattern[i] = ilet
@@ -758,6 +768,8 @@ class Wordle:
                         ibadlet.add(ord(tword[i]))
                     else:
                         ibadpos.add((i, ilet))
+            # This is to handle duplicate letters in the test word.
+            ibadlet = ibadlet - set(ipattern) - {let for _, let in ibadpos}
             # get next test word
             warr = self.imatch_hints(ipattern, ibadpos, ibadlet, warr)
             print(
