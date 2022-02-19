@@ -1,4 +1,4 @@
-# Cache for dataset={self.dataset}
+# Cache for dataset=en-hello-full
 # first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next
 soare ..... ..... 221 fitly 7.47
 soare ..... s.... 49 pithy 2.84

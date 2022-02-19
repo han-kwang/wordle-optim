@@ -1,0 +1,24 @@
+# Cache for dataset=en-full:absurdle (hand-made)
+# first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next
+aiery ..... a.... 171 coast 14
+ayrie ..... a.... 171 coast 14
+ariel ..... ..... 173 ghost 13
+raile ..... ..... 173 ghost 13
+aloes ..... ...e. 174 trice 13
+realo ..... ..... 176 tipsy 13
+stoae ..... ....e 177 filer 14
+anole ..... ....e 181 their 19
+aeros ..... ..... 183 lying 14
+reoil ..... ..... 186 scant 15
+oiler ..... ..... 186 scant 15
+oriel ..... ..... 186 scant 15
+uraei ..... ....i 187 stony 19
+coate ..... ....e 192 filer 19
+telia ..... ..... 194 scorn 15
+oater ..... ..... 195 slimy 13
+aeons ..... .e... 195 plier 13
+orate ..... ..... 195 slimy 13
+raine ..... ..... 195 blush 15
+roate ..... ..... 195 slimy 13
+arise ..... ..... 168 blond 15
+raise ..... ..... 168 blond 15

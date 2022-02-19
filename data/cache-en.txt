@@ -1,4 +1,4 @@
-# Cache for dataset={self.dataset}
+# Cache for dataset=en
 # first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next
 raise ..... ..... 168 could 6.28
 raise ..... r.... 103 count 4.94

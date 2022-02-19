@@ -9,6 +9,7 @@ Wordle game, in particular:
 - https://www.powerlanguage.co.uk/wordle/ (original English)
 - https://hellowordl.net/ (English)
 - https://woordle.nl/ (Dutch)
+- https://qntm.org/absurdle (English; adversial version)
 
 There must be tens of other projects doing the similar things. Well, this
 is mine; I wrote it for fun without checking other approaches.
@@ -41,7 +42,7 @@ How to add a game dataset
   and b for allowed words to enter. Store in text files ('\n' line endings)
   in the data directory.
 - Update `Wordle.__init__` and `Wordle.get_datasets`.
-- Run: `wrd = Wordle('yourdataset'); wrd.test_words(wrd.warr_a)`
+- Run: `wrd = Wordle('yourdataset'); wrd.get_optimal_first_word()`
 - Use output to update `_FIRST_WORDS` in wordlestrat2.py
 - Run: `Wordle('yourdataset'); wrd.build_cache()`
 - Before committing, copy cache/cache-yourdataset.txt to the data/

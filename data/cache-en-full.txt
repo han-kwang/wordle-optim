@@ -1,4 +1,4 @@
-# Cache for dataset={self.dataset}
+# Cache for dataset=en-full
 # first_word, hit_pattern, badpos, nmatch, nextword, nmatch_next
 roate ..... ..... 195 slimy 5.63
 roate ..... r.... 63 slick 2.97

@@ -44,6 +44,7 @@ def str2iarr(words):
 
     return a
 
+
 def iarr2str(warr):
     """Convert int array to string or string array.
 
@@ -68,12 +69,15 @@ BLACKLISTS = {
     'en-2700': {'alton', 'ethan', 'aires', 'aries', 'bligh'}
     }
 
+# This list is also the reference for the supported dataset.
+# When adding a new dataset, put a placeholder first word here.
 _FIRST_WORDS = {
-    # Dataset name -> (word, n_expected)
+    # Dataset name (or '{dname}:{absurdle}' -> (word, n_expected)
     # in comments: other words and calculation time (2 cores, 4 threads)
     'en': ('raise', 61.0),  # arise (63.7), irate (63.8) / 22min
     'en-2700': ('raise', 57.9),  # didn't update
     'en-full': ('roate', 60.4), # raise (61.0) raile (61.3), soare (62.5) / 1h03m
+    'en-full:absurdle': ('ayrie', 171),  # aiery, ariel, raile
     'en-hello': ('raise', 83.5),
     'en-hello-full': ('soare', 82.8), # , raise (83.5), raile (83.6)
     'nl': ('tenor', 21.6),
@@ -103,7 +107,9 @@ def _load_wlist(fname, wlen=5, maxnum=99999, iarr=False, blacklist_key=None):
 _WORKER_PERSISTENT = {}
 
 def _test_1word(tword):
-    """Return mean number of matches against all words. For multiprocessing worker.
+    """Return mean* number of matches against all words. For multiprocessing worker.
+
+    (*) For strategy='absurdle', return maximum number of matches.
 
     Parameter:
 
@@ -128,7 +134,15 @@ def _test_1word(tword):
         bpos = np.array(bpos, dtype=np.int16).reshape(-1, 2)
         matches = wordle.imatch_hints(pat, bpos, blets, warr=warr)
         nmatch[j] = len(matches)
-    return nmatch.mean()
+
+    if wordle.strategy == 'wordle':
+        return nmatch.mean()
+
+    if wordle.strategy == 'absurdle':
+        return nmatch.max()
+
+    raise ValueError(wordle.strategy)
+
 
 def _set_nice(target=10):
     """Increase nice value of process."""
@@ -154,6 +168,8 @@ class Wordle:
       - 'en-hello-full': List for Hello Wordl (a:3270, b: 12970)
       - 'en-2700': English word list (2700 words)
       - 'en-full': Original Wordle list (a:2315, b:10657)
+      - 'en-full:absurdle': same lists, but strategy for Absurdle
+        (https://qntm.org/files/absurdle/absurdle.html)
 
     To get the list of dataset names, use::
 
@@ -188,17 +204,24 @@ class Wordle:
     - dataset: dataset used for initialization (do not modify).
     - cache: dictionary with keys '<firstword> <pattern> <badpos>',
       values (num_match, next_word, num_match_next)
+    - strategy: 'wordle' (regular) or 'absurdle' (computer uses
+      adversarial strategy)
     """
     @classmethod
     def get_datasets(cls):
         """Return list of supported dataset names."""
-        return ['nl', 'en-2700', 'en-full', 'en', 'en-hello', 'en-hello-full']
+        return list(_FIRST_WORDS.keys())
 
     def __init__(self, dataset='en'):
         """Initialize, see class doc."""
         self.alphabet = np.arange(26, dtype=np.int16) + ord('a')
+        if dataset.endswith(':absurdle'):
+            dataset = dataset.split(':')[0]
+            self.strategy = 'absurdle'
+        else:
+            self.strategy = 'wordle'
+
         self.dataset = str(dataset)
-        self.first_word, self.first_word_expected = _FIRST_WORDS[dataset]
         if dataset == 'nl':
             self.warr_b = _load_wlist('data/woordle-nl-b.txt', iarr=True)
             self.warr_a = _load_wlist('data/woordle-nl-a.txt', iarr=True)
@@ -226,6 +249,10 @@ class Wordle:
             self.warr_b = self.warr_a
         else:
             raise ValueError(f'dataset={dataset!r} / try get_all() method.')
+
+
+        key = f'{dataset}:absurdle' if self.strategy == 'absurdle' else dataset
+        self.first_word, self.first_word_expected = _FIRST_WORDS[key]
         self.cache = self._load_cache()
 
 
@@ -407,15 +434,6 @@ class Wordle:
         for k in ['warr', 'wordle_obj']:
             del _WORKER_PERSISTENT[k]
         return np.around(mnm, 3)
-
-    def get_optimal_first_word(self):
-        """Find optimal first word from self.warr_b. Warning: slow!
-
-        This will update self.first_word and self.first_n_expect.
-        """
-        iwords, nex = self.test_words(self.warr_a, self.warr_b)
-        self.first_word = iarr2str(iwords[0])
-        self.first_n_expect = np.around(nex, 3)
 
     def test_words(self, warr, twarr=None, nshow=3, pri_time=2):
         """Test all vocabulary words for selectivity.
@@ -753,7 +771,7 @@ class Wordle:
             good_response = True
             for (twl, rl) in zip(tword, r):
                 if rl not in ('.', twl, twl.upper()):
-                    print(f"This response doesn't match {tword!r}")
+                    print(f"\033[31;1mThis response doesn't match {tword!r}\033[0m")
                     good_response = False
                     break
             if not good_response:
@@ -812,15 +830,30 @@ class Wordle:
         """
         self.match_hints(*hints.split(' ', maxsplit=3))
 
-    def find_optimal_first_word(self, select=1, ret_full=False, print_=True):
+    def get_optimal_first_word(self):
+        """Find optimal first word from self.warr_b. Warning: slow!
+
+        Consider using find_optimal_first_word instead.
+
+        This will update self.first_word and self.first_n_expect.
+        """
+        iwords, nex = self.test_words(self.warr_a, self.warr_b)
+        self.first_word = iarr2str(iwords[0])
+        self.first_n_expect = np.around(nex, 3)
+
+
+    def find_optimal_first_word(self, select=2, ret_full=False, print_=True,
+                                pre_quantile=0.05):
         """Find optimal first word. This is slow.
 
         Parameters:
 
-        - select: indicate dictionary size to work with; 0: small for testing;
+        - select: indicate dictionary size to work with; 0: small for testing:
           1: select words from self.warr_a; 2: select from self.warr_b.
         - ret_full: True to return full list; False to return best 10 and
           another 10 picked from the rest.
+        - pre_quantile: preselect this fraction of the b- or a-list based
+          on letter frequencies.
 
         Return:
 
@@ -840,6 +873,9 @@ class Wordle:
             warr, twarr = self.warr_a, self.warr_b
         else:
             raise ValueError(f'select={select}')
+
+        twarr = self._preselect_candidate_1st_words(twarr, f=pre_quantile)
+
         words, scores = self.test_words(warr, twarr)
         words = iarr2str(words)
         scores = np.around(scores, 2)
@@ -869,7 +905,11 @@ class Wordle:
         if not cpath.exists():
             cpath.mkdir()
             print(f'Created {cpath}')
-        cfpath = cpath / f'cache-{self.dataset}.txt'
+
+        if self.strategy == 'wordle':
+            cfpath = cpath / f'cache-{self.dataset}.txt'
+        elif self.strategy == 'absurdle':
+            cfpath = cpath / f'cache-{self.dataset}-absurdle.txt'
 
         if not cfpath.is_file():
             cfpath_dist = (dpath / cfpath.name)
@@ -949,3 +989,27 @@ class Wordle:
         cfpath_tmp.rename(cfpath)
         print(f'Wrote cache to {cfpath} .')
         self._load_cache()
+
+    def _preselect_candidate_1st_words(self, twords, f=0.05):
+        """Get candidate words to use as first word.
+
+        Parameters:
+
+        - twords: full test words array (N, 5) int.
+        - f: fraction of the full list to use.
+        """
+        # Get letter frequencies out of 'a' list.
+        lfreqs = [
+            (self.warr_a == ilet).sum() / self.warr_a.size
+            for ilet in self.alphabet
+            ]
+
+        # build scores for each of the 'b-list' words.
+        scores = np.zeros(twords.shape[0])
+        for ilet, lfreq in zip(self.alphabet, lfreqs):
+            scores += np.any(twords == ilet, axis=1) * lfreq
+
+        min_score = np.quantile(scores, 1-f)
+
+        warr = self.warr_b[scores >= min_score, :]
+        return warr
